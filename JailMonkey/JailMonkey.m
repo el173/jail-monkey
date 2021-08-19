@@ -14,6 +14,7 @@
 static NSString * const JMJailbreakTextFile = @"/private/jailbreak.txt";
 static NSString * const JMisJailBronkenKey = @"isJailBroken";
 static NSString * const JMCanMockLocationKey = @"canMockLocation";
+static NSString * const JMJailBrokenMessageKey = @"jailBrokenMessage";
 
 @implementation JailMonkey
 
@@ -37,6 +38,7 @@ RCT_EXPORT_MODULE();
             @"/Applications/MxTube.app",
             @"/Applications/RockApp.app",
             @"/Applications/SBSettings.app",
+            @"/Applications/Sileo.app",
             @"/Applications/Snoop-itConfig.app",
             @"/Applications/WinterBoard.app",
             @"/Applications/blackra1n.app",
@@ -44,6 +46,10 @@ RCT_EXPORT_MODULE();
             @"/Library/MobileSubstrate/DynamicLibraries/LiveClock.plist",
             @"/Library/MobileSubstrate/DynamicLibraries/Veency.plist",
             @"/Library/MobileSubstrate/MobileSubstrate.dylib",
+            @"/Library/PreferenceBundles/ABypassPrefs.bundle",
+            @"/Library/PreferenceBundles/FlyJBPrefs.bundle",
+            @"/Library/PreferenceBundles/LibertyPref.bundle",
+            @"/Library/PreferenceBundles/ShadowPreferences.bundle",
             @"/System/Library/LaunchDaemons/com.ikey.bbot.plist",
             @"/System/Library/LaunchDaemons/com.saurik.Cydia.Startup.plist",
             @"/bin/bash",
@@ -72,7 +78,11 @@ RCT_EXPORT_MODULE();
             @"/usr/bin/cycript",
             @"/usr/bin/sshd",
             @"/usr/lib/libcycript.dylib",
+            @"/usr/lib/libhooker.dylib",
             @"/usr/lib/libjailbreak.dylib",
+            @"/usr/lib/libsubstitute.dylib",
+            @"/usr/lib/substrate",
+            @"/usr/lib/TweakInject",
             @"/usr/libexec/cydia",
             @"/usr/libexec/cydia/firmware.sh",
             @"/usr/libexec/sftp-server",
@@ -94,7 +104,9 @@ RCT_EXPORT_MODULE();
 - (NSArray *)schemesToCheck
 {
     return @[
+            @"activator://package/com.example.package",
             @"cydia://package/com.example.package",
+            @"filza://package/com.example.package",
             @"sileo://package/com.example.package",
             @"undecimus://package/com.example.package",
             @"zbra://package/com.example.package"
@@ -122,20 +134,28 @@ RCT_EXPORT_MODULE();
             @"/.file",
             @"/usr/lib/Cephei.framework/Cephei",
             @"0Shadow.dylib",
+            @"ABypass",
+            @"Cephei",
             @"CustomWidgetIcons",
             @"CydiaSubstrate",
+            @"Electra",
+            @"FlyJB",
             @"FridaGadget",
             @"MobileSubstrate.dylib",
             @"PreferenceLoader",
             @"RocketBootstrap",
             @"SSLKillSwitch.dylib",
             @"SSLKillSwitch2.dylib",
+            @"Substitute",
+            @"SubstrateBootstrap",
+            @"SubstrateInserter",
             @"SubstrateInserter.dylib",
             @"SubstrateLoader.dylib",
             @"TweakInject.dylib",
             @"WeeLoader",
             @"cyinject",
             @"libcycript",
+            @"libhooker",
             @"libsparkapplist.dylib",
             @"zzzzLiberty.dylib",
             @"zzzzzzUnSub.dylib"
@@ -173,17 +193,17 @@ RCT_EXPORT_MODULE();
 - (BOOL)checkDylibs
 {
     NSString *imagePath;
-    
+
     for (int i=0; i < _dyld_image_count(); i++) {
         imagePath = [NSString stringWithUTF8String:_dyld_get_image_name(i)];
-        
+
         for (NSString *dylibPath in [self dylibsToCheck]) {
             if([imagePath localizedCaseInsensitiveContainsString:dylibPath]) {
                 return YES;
             }
         }
     }
-    
+
     return NO;
 }
 
@@ -212,7 +232,7 @@ RCT_EXPORT_MODULE();
     if(pid >= 0) {
         return YES;
     }
-    
+
     return NO;
 }
 
@@ -252,7 +272,7 @@ RCT_EXPORT_MODULE();
 
 RCT_EXPORT_METHOD(isDebuggedMode:(RCTPromiseResolveBlock) resolve
     rejecter:(RCTPromiseRejectBlock) __unused reject) {
-    BOOL *isDebuggedModeActived = [self isDebugged]; 
+    BOOL *isDebuggedModeActived = [self isDebugged];
     resolve(isDebuggedModeActived ? @YES : @NO);
 }
 
@@ -261,20 +281,114 @@ RCT_EXPORT_METHOD(isDebuggedMode:(RCTPromiseResolveBlock) resolve
       return NO;
     #endif
     BOOL isiOSAppOnMac = false;
-    if (@available(iOS 14.0, *)) {
-        isiOSAppOnMac = [NSProcessInfo processInfo].isiOSAppOnMac;
-    }
+
+    #if defined(__IPHONE_14_0) && __IPHONE_OS_VERSION_MAX_ALLOWED >= 140000
+        if (@available(iOS 14.0, *)) {
+            // Early iOS 14 betas do not include isiOSAppOnMac
+            isiOSAppOnMac = (
+                [[NSProcessInfo processInfo] respondsToSelector:@selector(isiOSAppOnMac)] &&
+                [NSProcessInfo processInfo].isiOSAppOnMac
+            );
+        }
+    #endif // defined(__IPHONE_14_0) && __IPHONE_OS_VERSION_MAX_ALLOWED >= 140000
+
     if (isiOSAppOnMac) {
         return false;
     }
     return [self checkPaths] || [self checkSchemes] || [self canViolateSandbox] || [self canFork] || [self checkSymlinks] || [self checkDylibs];
 }
 
+
+-(NSString *)jailBrokenMessage{
+    NSString *errorMessage = @"";
+    
+    if([self isJailBroken])
+    {
+        if ([self checkPaths]) {
+        errorMessage = [NSString stringWithFormat:@"%@,#%@", errorMessage, @"checkPaths"];
+            errorMessage =[NSString stringWithFormat:@"%@,[%@]", errorMessage, [self checkPathsMessage]];
+        }
+        if ([self checkSchemes]) {
+        errorMessage = [NSString stringWithFormat:@"%@,#%@", errorMessage, @"checkSchemes"];
+            errorMessage =[NSString stringWithFormat:@"%@,[%@]", errorMessage, [self checkSchemesMessage]];
+        }
+        if ([self canViolateSandbox]) {
+        errorMessage = [NSString stringWithFormat:@"%@,#%@", errorMessage, @"canViolateSandbox"];
+        }
+        if ([self canFork]) {
+        errorMessage = [NSString stringWithFormat:@"%@,#%@", errorMessage, @"canFork"];
+        }
+        if ([self checkSymlinks]) {
+            errorMessage = [NSString stringWithFormat:@"%@,#%@", errorMessage, @"checkSymlinks"];
+            errorMessage =[NSString stringWithFormat:@"%@,[%@]", errorMessage, [self checkSymlinksMessage]];
+        }
+        if ([self checkDylibs]) {
+            errorMessage = [NSString stringWithFormat:@"%@,#%@", errorMessage, @"checkDylibs"];
+            errorMessage =[NSString stringWithFormat:@"%@,[%@]", errorMessage, [self checkDylibsMessage]];
+        }
+    }
+   return errorMessage;
+}
+
+- (NSString *)checkSchemesMessage
+{
+    NSString *schemeMessage = @"";
+    for (NSString *scheme in [self schemesToCheck]) {
+        if([[UIApplication sharedApplication] canOpenURL:[NSURL URLWithString:scheme]]){
+            schemeMessage = [NSString stringWithFormat:@"%@,%@", schemeMessage, scheme];
+            break;
+        }
+    }
+    return schemeMessage;
+}
+
+- (NSString *)checkPathsMessage
+{
+    NSString *existsPath = @"";
+    for (NSString *path in [self pathsToCheck]) {
+        if ([[NSFileManager defaultManager] fileExistsAtPath:path]){
+            existsPath = [NSString stringWithFormat:@"%@,%@", existsPath, path];
+            break;
+        }
+    }
+    return existsPath;
+}
+
+
+- (NSString *)checkSymlinksMessage
+{
+    NSString *symLinkMessage = @"";
+    for (NSString *symlink in [self symlinksToCheck]) {
+        NSString* result = [[NSFileManager defaultManager] destinationOfSymbolicLinkAtPath:symlink error:nil];
+        if([result length] > 0) {
+            symLinkMessage = [NSString stringWithFormat:@"%@,%@", symLinkMessage, symlink];
+        }
+    }
+    return symLinkMessage;
+}
+
+- (NSString *)checkDylibsMessage
+{
+    NSString *imagePath = @"";
+    
+    for (int i=0; i < _dyld_image_count(); i++) {
+        imagePath = [NSString stringWithUTF8String:_dyld_get_image_name(i)];
+        
+        for (NSString *dylibPath in [self dylibsToCheck]) {
+            if([imagePath localizedCaseInsensitiveContainsString:dylibPath]) {
+                imagePath = [NSString stringWithFormat:@"%@,%@", imagePath, dylibPath];
+            }
+        }
+    }
+    return imagePath;
+}
+
 - (NSDictionary *)constantsToExport
 {
 	return @{
 		JMisJailBronkenKey: @(self.isJailBroken),
-		JMCanMockLocationKey: @(self.isJailBroken)
+		JMCanMockLocationKey: @(self.isJailBroken),
+        JMJailBrokenMessageKey : [self jailBrokenMessage]
 	};
 }
 
